@@ -7,9 +7,9 @@
 PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
-# A specific older nightly version that might have the bpfel-unknown-none component.
-# This is a common workaround as newer nightlies can sometimes be unstable for this target.
-NIGHTLY_VERSION="nightly-2024-02-01" 
+# We will rely on `rustup install nightly --component complete`
+# to find a suitable nightly version that has all required components.
+NIGHTLY_TOOLCHAIN="nightly" # Use 'nightly' and let rustup find the specific date with --component complete
 
 # --- Functions ---
 
@@ -50,19 +50,26 @@ install_prerequisites() {
         log_info "Rust and Cargo are already installed."
     fi
 
-    log_info "Installing Rust nightly toolchain ($NIGHTLY_VERSION)..."
-    rustup install "$NIGHTLY_VERSION" || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_VERSION)."
+    log_info "Installing Rust nightly toolchain ($NIGHTLY_TOOLCHAIN) with complete components..."
+    # `--component complete` will find a nightly version where all components are available.
+    rustup install "$NIGHTLY_TOOLCHAIN" --component complete || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_TOOLCHAIN) with complete components."
 
-    log_info "Adding bpfel-unknown-none target to Rustup $NIGHTLY_VERSION toolchain..."
-    # This is crucial for cross-compiling eBPF programs, and it's typically available on nightly
-    rustup target add bpfel-unknown-none --toolchain "$NIGHTLY_VERSION" || log_error "Failed to add bpfel-unknown-none target to $NIGHTLY_VERSION."
+    # After installing, we need to know the *exact* date of the nightly installed by rustup.
+    # This command gets the active nightly version and extracts the date.
+    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
+    if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
+        log_error "Could not determine the exact date of the installed nightly toolchain. Please check rustup output."
+    fi
+    log_info "Determined installed nightly toolchain date: $INSTALLED_NIGHTLY_DATE"
+
+    log_info "Adding bpfel-unknown-none target to Rustup $INSTALLED_NIGHTLY_DATE toolchain..."
+    rustup target add bpfel-unknown-none --toolchain "$INSTALLED_NIGHTLY_DATE" || log_error "Failed to add bpfel-unknown-none target to $INSTALLED_NIGHTLY_DATE."
 
     log_info "Installing bpf-linker..."
-    # Ensure cargo is in PATH for this to work in a fresh environment
     export PATH="$HOME/.cargo/bin:$PATH"
     if ! command -v bpf-linker &> /dev/null; then
         # Install bpf-linker using the specific nightly toolchain
-        cargo +"$NIGHTLY_VERSION" install bpf-linker || log_error "Failed to install bpf-linker."
+        cargo +"$INSTALLED_NIGHTLY_DATE" install bpf-linker || log_error "Failed to install bpf-linker."
     else
         log_info "bpf-linker is already installed."
     fi
@@ -75,7 +82,6 @@ create_project_structure() {
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to change to project directory."
 
     log_info "Creating eBPF program crate ($EBPF_CRATE)..."
-    # Cargo new will create the directory and initial Cargo.toml
     cargo new --bin "$EBPF_CRATE" || log_error "Failed to create eBPF crate."
 
     log_info "Creating user-space application crate ($USER_CRATE)..."
@@ -114,8 +120,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-bpf = { version = "0.12.0", features = ["macros"] } # Updated version to match current aya-rs ecosystem
-aya-log-ebpf = "0.1.0" # Assuming this aligns with aya-bpf 0.12.0, adjust if needed
+aya-bpf = { version = "0.12.0", features = ["macros"] }
+aya-log-ebpf = "0.1.0"
 
 [[bin]]
 name = "$EBPF_CRATE"
@@ -132,46 +138,23 @@ use aya_bpf::{
     macros::{xdp, map},
     programs::XdpContext,
     maps::HashMap,
-    helpers::bpf_get_prandom_u32, // Example helper for future use
+    helpers::bpf_get_prandom_u32,
 };
 use aya_log_ebpf::info;
 
-// Define a HashMap for storing allow/deny rules (example for future expansion)
-// Key: IPv4 address (u32), Value: action (u8, e.g., 0 for DENY, 1 for ALLOW)
 #[map(name = "RULES")]
 static mut RULES: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 
-// XDP program entry point
-// XDP (eXpress Data Path) programs run very early in the network stack.
 #[xdp]
 pub fn firewall_ebpf(ctx: XdpContext) -> u32 {
     match try_firewall_ebpf(ctx) {
         Ok(ret) => ret,
-        Err(_) => aya_bpf::programs::xdp::XDP_PASS, // On error, just pass the packet
+        Err(_) => aya_bpf::programs::xdp::XDP_PASS,
     }
 }
 
 fn try_firewall_ebpf(ctx: XdpContext) -> Result<u32, i64> {
     info!(&ctx, "Received XDP packet from interface {}", ctx.ifindex());
-
-    // In a real firewall, you would parse the packet (Ethernet, IP, TCP/UDP headers)
-    // to inspect source/destination IPs, ports, protocols, etc.
-    // For this basic example, we'll just pass all packets.
-
-    // Example of using a map (not fully implemented for filtering yet, just for demonstration):
-    // let ip_addr = 0x7F000001; // Example: 127.0.0.1
-    // if let Some(action) = unsafe { RULES.get(&ip_addr) } {
-    //     if *action == 0 { // If action is DENY
-    //         info!(&ctx, "Packet from 127.0.0.1 DENIED by rule!");
-    //         return Ok(aya_bpf::programs::xdp::XDP_DROP);
-    //     }
-    // }
-
-    // For now, always pass the packet.
-    // XDP_PASS: Pass the packet to the normal network stack.
-    // XDP_DROP: Drop the packet.
-    // XDP_TX: Transmit the packet back out the same interface.
-    // XDP_REDIRECT: Redirect the packet to another interface or CPU.
     Ok(aya_bpf::programs::xdp::XDP_PASS)
 }
 
@@ -190,10 +173,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya = { version = "0.12.0", features = ["async_tokio"] } # Updated version to match current aya-rs ecosystem
-aya-log = "0.1.0" # Assuming this aligns with aya 0.12.0, adjust if needed
+aya = { version = "0.12.0", features = ["async_tokio"] }
+aya-log = "0.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
-clap = { version = "4", features = ["derive"] } # For command-line arguments
+clap = { version = "4", features = ["derive"] }
 anyhow = "1.0"
 EOF
 
@@ -220,14 +203,8 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-
-    // Bump the memlock limit. This is often required for eBPF programs.
-    // This allows the process to lock more memory, which eBPF programs need.
-    // 'rlimit' is "resource limit".
     bump_memlock_rlimit()?;
 
-    // Load the eBPF program from the compiled BPF object file.
-    // The BPF object file is generated when you build firewall-ebpf.
     #[cfg(debug_assertions)]
     let mut bpf = Bpf::load(include_bytes!(
         "../../target/bpfel-unknown-none/debug/firewall-ebpf"
@@ -237,50 +214,30 @@ async fn main() -> Result<()> {
         "../../target/bpfel-unknown-none/release/firewall-ebpf"
     ))?;
 
-    // Initialize the BPF logger, which allows your user-space app to receive logs
-    // from your eBPF program.
     if let Err(e) = BpfLogger::init(&mut bpf) {
         eprintln!("Failed to initialize BPF logger: {}", e);
     }
 
-    // Get the XDP program named "firewall_ebpf" from the loaded BPF object.
     let program: &mut Xdp = bpf.program_mut("firewall_ebpf")
         .ok_or_else(|| anyhow::anyhow!("Program 'firewall_ebpf' not found"))?
         .try_into()?;
 
-    // Attach the XDP program to the specified network interface.
-    // XdpFlags::SKB_MODE attaches the program in SKB (Socket Buffer) mode,
-    // which is generally safer but slightly less performant than DRV (Driver) mode.
-    // DRV mode requires driver support and direct interaction with the NIC.
     program.load()?;
     program.attach(&args.iface, XdpFlags::SKB_MODE)
         .context(format!("Failed to attach XDP program to interface '{}'", args.iface))?;
 
     println!("eBPF firewall program loaded and attached to interface: {}", args.iface);
     println!("Press Ctrl-C to exit and detach the program.");
-
-    // Example of interacting with an eBPF map:
-    // let mut rules_map: HashMap<_, u32, u8> = HashMap::try_from(bpf.map_mut("RULES")?)?;
-    // let ip_to_block: u32 = 0x0100007F; // 127.0.0.1 in network byte order (little-endian: 1.0.0.127)
-    // rules_map.insert(ip_to_block, 0, 0)?; // Insert rule: 127.0.0.1 -> DENY (0)
-    // println!("Added example rule to block 127.0.0.1 to eBPF map.");
-
-    // Wait for Ctrl-C signal to gracefully detach and exit.
     signal::ctrl_c().await?;
     println!("Detaching eBPF program.");
-
-    // The program is automatically detached when it goes out of scope or the process exits.
     Ok(())
 }
 
-// Helper function to bump the memlock rlimit.
-// eBPF programs require the ability to lock memory pages.
 fn bump_memlock_rlimit() -> Result<()> {
     let rlim = libc::rlimit {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
     };
-
     let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
     if ret != 0 {
         return Err(anyhow::any_how!("Failed to set rlimit: {}", std::io::Error::last_os_error()));
@@ -289,29 +246,33 @@ fn bump_memlock_rlimit() -> Result<()> {
 }
 EOF
     log_info "Project structure and files created successfully."
-    popd > /dev/null # Go back to the original directory
+    popd > /dev/null
 }
 
 # Function to compile the project
 compile_project() {
     log_info "Compiling eBPF program ($EBPF_CRATE)..."
-    # Ensure we're in the project root for workspace build
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
 
-    log_info "Updating Cargo dependencies using $NIGHTLY_VERSION..."
-    # Use specific nightly toolchain for cargo update
-    cargo +"$NIGHTLY_VERSION" update || log_error "Failed to update Cargo dependencies."
+    # Determine the actual installed nightly toolchain name (e.g., nightly-YYYY-MM-DD)
+    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
+    if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
+        log_error "Could not determine the exact date of the installed nightly toolchain for compilation."
+    fi
+    log_info "Using installed nightly toolchain: $INSTALLED_NIGHTLY_DATE"
 
-    log_info "Compiling eBPF program ($EBPF_CRATE) using $NIGHTLY_VERSION..."
-    # Use specific nightly toolchain for building the eBPF program
-    cargo +"$NIGHTLY_VERSION" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
+
+    log_info "Updating Cargo dependencies using $INSTALLED_NIGHTLY_DATE..."
+    cargo +"$INSTALLED_NIGHTLY_DATE" update || log_error "Failed to update Cargo dependencies."
+
+    log_info "Compiling eBPF program ($EBPF_CRATE) using $INSTALLED_NIGHTLY_DATE..."
+    cargo +"$INSTALLED_NIGHTLY_DATE" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
-    log_info "Compiling user-space application ($USER_CRATE) using $NIGHTLY_VERSION..."
-    # Use specific nightly toolchain for building the user-space application
-    cargo +"$NIGHTLY_VERSION" build --workspace --release || log_error "Failed to compile user-space application."
+    log_info "Compiling user-space application ($USER_CRATE) using $INSTALLED_NIGHTLY_DATE..."
+    cargo +"$INSTALLED_NIGHTLY_DATE" build --workspace --release || log_error "Failed to compile user-space application."
     log_info "User-space application compiled."
-    popd > /dev/null # Go back to the original directory
+    popd > /dev/null
 }
 
 # Function to run the firewall
