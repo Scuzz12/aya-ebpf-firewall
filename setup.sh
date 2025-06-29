@@ -7,7 +7,9 @@
 PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
-NIGHTLY_VERSION="nightly-2025-05-01" # A specific nightly version known to be more stable for bpfel-unknown-none
+# A specific older nightly version that might have the bpfel-unknown-none component.
+# This is a common workaround as newer nightlies can sometimes be unstable for this target.
+NIGHTLY_VERSION="nightly-2024-02-01" 
 
 # --- Functions ---
 
