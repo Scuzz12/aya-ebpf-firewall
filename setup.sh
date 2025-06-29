@@ -23,7 +23,7 @@ USER_CRATE="firewall-user"
 #    rustup target add bpfel-unknown-none --toolchain nightly-YYYY-MM-DD
 #    (ReplaceANSAS-MM-DD with the date you are testing.)
 # 6. If both commands succeed, replace the placeholder below with that exact date.
-NIGHTLY_VERSION="nightly-YYYY-MM-DD" # <--- REPLACE THIS PLACEHOLDER (e.g., nightly-2023-09-01)
+NIGHTLY_VERSION="nightly-2025-06-29" # <--- REPLACE THIS PLACEHOLDER (e.g., nightly-2023-09-01)
 
 # Ensure Cargo's bin directory is in PATH for the current script execution.
 # This helps if .cargo/env wasn't sourced or sudo cleans the PATH.
@@ -70,7 +70,7 @@ install_prerequisites() {
     fi
 
     # Check if NIGHTLY_VERSION is still the placeholder
-    if [[ "$NIGHTLY_VERSION" == "nightly-2025-06-29" ]]; then
+    if [[ "$NIGHTLY_VERSION" == "nightly-YYYY-MM-DD" ]]; then
         log_error "The NIGHTLY_VERSION placeholder is still present."
         log_error "Please follow the instructions in the script's comments to find a compatible nightly date and update the script."
     fi
@@ -276,7 +276,8 @@ compile_project() {
     cargo +"$NIGHTLY_VERSION" update || log_error "Failed to update Cargo dependencies."
 
     log_info "Compiling eBPF program ($EBPF_CRATE) using $NIGHTLY_VERSION..."
-    cargo +"$NIGHTLY_VERSION" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
+    # Added -Z build-std=core for no-std target
+    cargo +"$NIGHTLY_VERSION" build --workspace --release --target bpfel-unknown-none -Z build-std=core || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
     log_info "Compiling user-space application ($USER_CRATE) using $NIGHTLY_VERSION..."
