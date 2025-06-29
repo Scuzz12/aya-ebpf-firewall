@@ -7,9 +7,27 @@
 PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
-# We will now attempt to install the latest `nightly` toolchain
-# with `--component complete` and let rustup determine the specific date.
-NIGHTLY_TOOLCHAIN_NAME="nightly" # Use 'nightly' as the target name for rustup install
+
+# IMPORTANT: You need to find a nightly toolchain that has the 'rust-std'
+# component available for the 'bpfel-unknown-none' target.
+#
+# HOW TO FIND A COMPATIBLE NIGHTLY:
+# 1. Visit: https://rust-lang.github.io/rustup-components-history
+# 2. In the "Target" filter, type 'bpfel-unknown-none'.
+# 3. In the "Component" filter, type 'rust-std'.
+# 4. Look for a date where 'rust-std' is marked as "available" (green checkmark).
+#    Often, older dates (e.g., from late 2023 or early 2024) are more stable for this specific target.
+#    As a starting point, you could try 'nightly-2023-09-01' or 'nightly-2024-01-15'.
+# 5. Once you find a promising date (e.g., '2023-09-01'), test it manually in your terminal:
+#    rustup toolchain install nightly-YYYY-MM-DD
+#    rustup target add bpfel-unknown-none --toolchain nightly-YYYY-MM-DD
+#    (ReplaceANSAS-MM-DD with the date you are testing.)
+# 6. If both commands succeed, replace the placeholder below with that exact date.
+NIGHTLY_VERSION="nightly-YYYY-MM-DD" # <--- REPLACE THIS PLACEHOLDER (e.g., nightly-2023-09-01)
+
+# Ensure Cargo's bin directory is in PATH for the current script execution.
+# This helps if .cargo/env wasn't sourced or sudo cleans the PATH.
+export PATH="$HOME/.cargo/bin:$PATH"
 
 # --- Functions ---
 
@@ -41,36 +59,31 @@ install_prerequisites() {
     log_info "Installing clang, llvm, libelf-dev, build-essential, and kernel headers..."
     sudo apt install -y clang llvm libelf-dev build-essential linux-headers-$(uname -r) || log_error "Failed to install core build tools and kernel headers."
 
-    log_info "Installing Rust and Cargo..."
+    log_info "Checking/Installing Rust and Cargo..."
     if ! command -v rustup &> /dev/null; then
+        log_info "Rustup not found, installing Rust and Cargo..."
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        # Source cargo env, but for the script's sake, we'll ensure paths later.
-        source "$HOME/.cargo/env" || log_warn "Could not source Cargo environment, please ensure ~/.cargo/env is sourced in your shell."
+        # Re-export PATH after rustup install, just in case
+        export PATH="$HOME/.cargo/bin:$PATH"
     else
         log_info "Rust and Cargo are already installed."
     fi
 
-    log_info "Installing Rust nightly toolchain ($NIGHTLY_TOOLCHAIN_NAME) with complete components..."
-    # `--component complete` attempts to find a nightly version where all components are available.
-    rustup install "$NIGHTLY_TOOLCHAIN_NAME" --component complete || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_TOOLCHAIN_NAME) with complete components."
-
-    # After installing, we need to know the *exact* date of the nightly installed by rustup.
-    # This command gets the active nightly version and extracts the date part.
-    # We grep for 'nightly' to ensure we pick the nightly toolchain if multiple are present.
-    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep 'nightly' | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
-    if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
-        log_error "Could not determine the exact date of the installed nightly toolchain. Please check rustup output."
+    # Check if NIGHTLY_VERSION is still the placeholder
+    if [[ "$NIGHTLY_VERSION" == "nightly-YYYY-MM-DD" ]]; then
+        log_error "The NIGHTLY_VERSION placeholder is still present."
+        log_error "Please follow the instructions in the script's comments to find a compatible nightly date and update the script."
     fi
-    log_info "Determined installed nightly toolchain date: $INSTALLED_NIGHTLY_DATE"
 
-    log_info "Adding bpfel-unknown-none target to Rustup $INSTALLED_NIGHTLY_DATE toolchain..."
-    rustup target add bpfel-unknown-none --toolchain "$INSTALLED_NIGHTLY_DATE" || log_error "Failed to add bpfel-unknown-none target to $INSTALLED_NIGHTLY_DATE."
+    log_info "Installing Rust nightly toolchain ($NIGHTLY_VERSION)..."
+    rustup install "$NIGHTLY_VERSION" || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_VERSION)."
+
+    log_info "Adding bpfel-unknown-none target to Rustup $NIGHTLY_VERSION toolchain..."
+    rustup target add bpfel-unknown-none --toolchain "$NIGHTLY_VERSION" || log_error "Failed to add bpfel-unknown-none target to $NIGHTLY_VERSION."
 
     log_info "Installing bpf-linker..."
-    export PATH="$HOME/.cargo/bin:$PATH" # Ensure cargo is in PATH
     if ! command -v bpf-linker &> /dev/null; then
-        # Install bpf-linker using the specific installed nightly toolchain
-        cargo +"$INSTALLED_NIGHTLY_DATE" install bpf-linker || log_error "Failed to install bpf-linker."
+        cargo +"$NIGHTLY_VERSION" install bpf-linker || log_error "Failed to install bpf-linker."
     else
         log_info "bpf-linker is already installed."
     fi
@@ -255,23 +268,19 @@ compile_project() {
     log_info "Compiling eBPF program ($EBPF_CRATE)..."
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
 
-    # Determine the actual installed nightly toolchain name (e.g., nightly-YYYY-MM-DD)
-    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep 'nightly' | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
-    if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
-        log_error "Could not determine the exact date of the installed nightly toolchain for compilation."
-    fi
-    log_info "Using installed nightly toolchain: $INSTALLED_NIGHTLY_DATE"
+    # Use the NIGHTLY_VERSION set by the user
+    log_info "Using specified nightly toolchain: $NIGHTLY_VERSION"
 
 
-    log_info "Updating Cargo dependencies using $INSTALLED_NIGHTLY_DATE..."
-    cargo +"$INSTALLED_NIGHTLY_DATE" update || log_error "Failed to update Cargo dependencies."
+    log_info "Updating Cargo dependencies using $NIGHTLY_VERSION..."
+    cargo +"$NIGHTLY_VERSION" update || log_error "Failed to update Cargo dependencies."
 
-    log_info "Compiling eBPF program ($EBPF_CRATE) using $INSTALLED_NIGHTLY_DATE..."
-    cargo +"$INSTALLED_NIGHTLY_DATE" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
+    log_info "Compiling eBPF program ($EBPF_CRATE) using $NIGHTLY_VERSION..."
+    cargo +"$NIGHTLY_VERSION" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
-    log_info "Compiling user-space application ($USER_CRATE) using $INSTALLED_NIGHTLY_DATE..."
-    cargo +"$INSTALLED_NIGHTLY_DATE" build --workspace --release || log_error "Failed to compile user-space application."
+    log_info "Compiling user-space application ($USER_CRATE) using $NIGHTLY_VERSION..."
+    cargo +"$NIGHTLY_VERSION" build --workspace --release || log_error "Failed to compile user-space application."
     log_info "User-space application compiled."
     popd > /dev/null
 }
