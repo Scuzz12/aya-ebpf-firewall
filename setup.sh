@@ -70,7 +70,7 @@ install_prerequisites() {
     fi
 
     # Check if NIGHTLY_VERSION is still the placeholder
-    if [[ "$NIGHTLY_VERSION" == "nightly-YYYY-MM-DD" ]]; then
+    if [[ "$NIGHTLY_VERSION" == "nightly-2025-06-29" ]]; then
         log_error "The NIGHTLY_VERSION placeholder is still present."
         log_error "Please follow the instructions in the script's comments to find a compatible nightly date and update the script."
     fi
