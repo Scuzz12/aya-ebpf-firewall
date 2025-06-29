@@ -4,7 +4,7 @@
 # aya-rs eBPF firewall project for Debian-based systems.
 
 # --- Global Variables ---
-PROJECT_DIR="aya-firewall"
+PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
 
@@ -59,19 +59,16 @@ install_prerequisites() {
 
 # Function to create project structure and files
 create_project_structure() {
-    log_info "Creating project directory: $PROJECT_DIR"
-    mkdir -p "$PROJECT_DIR" || log_error "Failed to create project directory."
-    cd "$PROJECT_DIR" || log_error "Failed to change to project directory."
+    log_info "Creating project directory: $PROJECT_NAME"
+    mkdir -p "$PROJECT_NAME" || log_error "Failed to create project directory."
+    pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to change to project directory."
 
     log_info "Initializing Rust workspace..."
-    # Create dummy lib to initialize workspace correctly, then remove it
-    cargo init --lib --name firewall-workspace && rm src/lib.rs || log_error "Failed to initialize workspace."
-
-    log_info "Creating eBPF program crate ($EBPF_CRATE)..."
-    cargo new --bin "$EBPF_CRATE" || log_error "Failed to create eBPF crate."
-
-    log_info "Creating user-space application crate ($USER_CRATE)..."
-    cargo new --bin "$USER_CRATE" || log_error "Failed to create user-space crate."
+    # Create a dummy lib package, then remove its src/lib.rs
+    # This creates the workspace Cargo.toml with basic structure.
+    cargo init --lib --name temp-workspace-init || log_error "Failed to initialize temporary workspace package."
+    rm -rf src # Remove the dummy src directory
+    rm Cargo.toml # Remove the temp Cargo.toml created by cargo init
 
     log_info "Writing Cargo.toml for workspace..."
     cat << EOF > Cargo.toml
@@ -86,6 +83,13 @@ lto = true
 strip = true
 codegen-units = 1
 EOF
+    log_info "Workspace Cargo.toml created."
+
+    log_info "Creating eBPF program crate ($EBPF_CRATE)..."
+    cargo new --bin "$EBPF_CRATE" || log_error "Failed to create eBPF crate."
+
+    log_info "Creating user-space application crate ($USER_CRATE)..."
+    cargo new --bin "$USER_CRATE" || log_error "Failed to create user-space crate."
 
     log_info "Writing $EBPF_CRATE/Cargo.toml..."
     cat << EOF > "$EBPF_CRATE"/Cargo.toml
@@ -283,20 +287,21 @@ fn bump_memlock_rlimit() -> Result<()> {
 }
 EOF
     log_info "Project structure and files created successfully."
+    popd > /dev/null # Go back to the original directory
 }
 
 # Function to compile the project
 compile_project() {
     log_info "Compiling eBPF program ($EBPF_CRATE)..."
     # Ensure we're in the project root for workspace build
-    pushd "$PROJECT_DIR" > /dev/null || log_error "Failed to move to project directory for compilation."
+    pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
     cargo build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
     log_info "Compiling user-space application ($USER_CRATE)..."
     cargo build --workspace --release || log_error "Failed to compile user-space application."
     log_info "User-space application compiled."
-    popd > /dev/null
+    popd > /dev/null # Go back to the original directory
 }
 
 # Function to run the firewall
@@ -306,7 +311,7 @@ run_firewall() {
         log_error "Usage: sudo ./setup.sh run <interface_name>"
     fi
     log_info "Running eBPF firewall on interface: $interface"
-    sudo "./$PROJECT_DIR/target/release/$USER_CRATE" -i "$interface" || log_error "Failed to run firewall."
+    sudo "./$PROJECT_NAME/target/release/$USER_CRATE" -i "$interface" || log_error "Failed to run firewall."
 }
 
 # --- Main Script Logic ---
