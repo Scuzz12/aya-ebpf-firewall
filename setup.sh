@@ -47,6 +47,10 @@ install_prerequisites() {
         log_info "Rust and Cargo are already installed."
     fi
 
+    log_info "Adding bpfel-unknown-none target to Rustup..."
+    # This is crucial for cross-compiling eBPF programs
+    rustup target add bpfel-unknown-none || log_error "Failed to add bpfel-unknown-none target."
+
     log_info "Installing bpf-linker..."
     # Ensure cargo is in PATH for this to work in a fresh environment
     export PATH="$HOME/.cargo/bin:$PATH"
