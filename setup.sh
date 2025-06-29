@@ -63,49 +63,22 @@ create_project_structure() {
     mkdir -p "$PROJECT_NAME" || log_error "Failed to create project directory."
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to change to project directory."
 
-    log_info "Initializing Rust workspace..."
-    # Create a dummy lib package, then remove its src/lib.rs
-    # This creates the workspace Cargo.toml with basic structure.
-    cargo init --lib --name temp-workspace-init || log_error "Failed to initialize temporary workspace package."
-    rm -rf src # Remove the dummy src directory
-    rm Cargo.toml # Remove the temp Cargo.toml created by cargo init
-
-    log_info "Writing Cargo.toml for workspace..."
-    cat << EOF > Cargo.toml
-[workspace]
-members = [
-    "$EBPF_CRATE",
-    "$USER_CRATE",
-]
-
-[profile.release]
-lto = true
-strip = true
-codegen-units = 1
-EOF
-    log_info "Workspace Cargo.toml created."
-
     log_info "Creating eBPF program crate ($EBPF_CRATE)..."
+    # Cargo new will create the directory and initial Cargo.toml
     cargo new --bin "$EBPF_CRATE" || log_error "Failed to create eBPF crate."
 
     log_info "Creating user-space application crate ($USER_CRATE)..."
     cargo new --bin "$USER_CRATE" || log_error "Failed to create user-space crate."
 
-    log_info "Writing $EBPF_CRATE/Cargo.toml..."
-    cat << EOF > "$EBPF_CRATE"/Cargo.toml
-# $EBPF_CRATE/Cargo.toml
-[package]
-name = "$EBPF_CRATE"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-aya-bpf = { version = "0.1.*", features = ["macros"] }
-aya-log-ebpf = "0.1.*" # For logging from eBPF
-
-[[bin]]
-name = "$EBPF_CRATE"
-path = "src/main.rs"
+    log_info "Writing Cargo.toml for workspace root..."
+    cat << EOF > Cargo.toml
+# Cargo.toml (at the root of aya-firewall directory)
+[workspace]
+members = [
+    "$EBPF_CRATE",
+    "$USER_CRATE",
+]
+resolver = "2" # Explicitly use resolver version 2 for Edition 2021
 
 [profile.dev]
 opt-level = 3
@@ -118,6 +91,24 @@ lto = true
 panic = "abort"
 codegen-units = 1
 strip = true
+EOF
+    log_info "Workspace Cargo.toml created."
+
+    log_info "Writing $EBPF_CRATE/Cargo.toml..."
+    cat << EOF > "$EBPF_CRATE"/Cargo.toml
+# $EBPF_CRATE/Cargo.toml
+[package]
+name = "$EBPF_CRATE"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-bpf = { version = "0.12.0", features = ["macros"] } # Updated version to match current aya-rs ecosystem
+aya-log-ebpf = "0.1.0" # Assuming this aligns with aya-bpf 0.12.0, adjust if needed
+
+[[bin]]
+name = "$EBPF_CRATE"
+path = "src/main.rs"
 EOF
 
     log_info "Writing $EBPF_CRATE/src/main.rs..."
@@ -188,8 +179,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya = { version = "0.1.*", features = ["async_tokio"] }
-aya-log = "0.1.*"
+aya = { version = "0.12.0", features = ["async_tokio"] } # Updated version to match current aya-rs ecosystem
+aya-log = "0.1.0" # Assuming this aligns with aya 0.12.0, adjust if needed
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 clap = { version = "4", features = ["derive"] } # For command-line arguments
 anyhow = "1.0"
@@ -295,6 +286,10 @@ compile_project() {
     log_info "Compiling eBPF program ($EBPF_CRATE)..."
     # Ensure we're in the project root for workspace build
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
+
+    log_info "Updating Cargo dependencies..."
+    cargo update || log_error "Failed to update Cargo dependencies."
+
     cargo build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
