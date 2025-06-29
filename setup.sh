@@ -7,9 +7,9 @@
 PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
-# We will rely on `rustup install nightly --component complete`
-# to find a suitable nightly version that has all required components.
-NIGHTLY_TOOLCHAIN="nightly" # Use 'nightly' and let rustup find the specific date with --component complete
+# We will now attempt to install the latest `nightly` toolchain
+# with `--component complete` and let rustup determine the specific date.
+NIGHTLY_TOOLCHAIN_NAME="nightly" # Use 'nightly' as the target name for rustup install
 
 # --- Functions ---
 
@@ -50,13 +50,14 @@ install_prerequisites() {
         log_info "Rust and Cargo are already installed."
     fi
 
-    log_info "Installing Rust nightly toolchain ($NIGHTLY_TOOLCHAIN) with complete components..."
-    # `--component complete` will find a nightly version where all components are available.
-    rustup install "$NIGHTLY_TOOLCHAIN" --component complete || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_TOOLCHAIN) with complete components."
+    log_info "Installing Rust nightly toolchain ($NIGHTLY_TOOLCHAIN_NAME) with complete components..."
+    # `--component complete` attempts to find a nightly version where all components are available.
+    rustup install "$NIGHTLY_TOOLCHAIN_NAME" --component complete || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_TOOLCHAIN_NAME) with complete components."
 
     # After installing, we need to know the *exact* date of the nightly installed by rustup.
-    # This command gets the active nightly version and extracts the date.
-    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
+    # This command gets the active nightly version and extracts the date part.
+    # We grep for 'nightly' to ensure we pick the nightly toolchain if multiple are present.
+    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep 'nightly' | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
     if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
         log_error "Could not determine the exact date of the installed nightly toolchain. Please check rustup output."
     fi
@@ -66,9 +67,9 @@ install_prerequisites() {
     rustup target add bpfel-unknown-none --toolchain "$INSTALLED_NIGHTLY_DATE" || log_error "Failed to add bpfel-unknown-none target to $INSTALLED_NIGHTLY_DATE."
 
     log_info "Installing bpf-linker..."
-    export PATH="$HOME/.cargo/bin:$PATH"
+    export PATH="$HOME/.cargo/bin:$PATH" # Ensure cargo is in PATH
     if ! command -v bpf-linker &> /dev/null; then
-        # Install bpf-linker using the specific nightly toolchain
+        # Install bpf-linker using the specific installed nightly toolchain
         cargo +"$INSTALLED_NIGHTLY_DATE" install bpf-linker || log_error "Failed to install bpf-linker."
     else
         log_info "bpf-linker is already installed."
@@ -255,7 +256,7 @@ compile_project() {
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
 
     # Determine the actual installed nightly toolchain name (e.g., nightly-YYYY-MM-DD)
-    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
+    INSTALLED_NIGHTLY_DATE=$(rustup show active toolchain | grep 'nightly' | grep -o 'nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}')
     if [ -z "$INSTALLED_NIGHTLY_DATE" ]; then
         log_error "Could not determine the exact date of the installed nightly toolchain for compilation."
     fi
