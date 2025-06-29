@@ -47,15 +47,19 @@ install_prerequisites() {
         log_info "Rust and Cargo are already installed."
     fi
 
-    log_info "Adding bpfel-unknown-none target to Rustup..."
-    # This is crucial for cross-compiling eBPF programs
-    rustup target add bpfel-unknown-none || log_error "Failed to add bpfel-unknown-none target."
+    log_info "Installing Rust nightly toolchain..."
+    rustup install nightly || log_error "Failed to install Rust nightly toolchain."
+
+    log_info "Adding bpfel-unknown-none target to Rustup nightly toolchain..."
+    # This is crucial for cross-compiling eBPF programs, and it's typically available on nightly
+    rustup target add bpfel-unknown-none --toolchain nightly || log_error "Failed to add bpfel-unknown-none target to nightly."
 
     log_info "Installing bpf-linker..."
     # Ensure cargo is in PATH for this to work in a fresh environment
     export PATH="$HOME/.cargo/bin:$PATH"
     if ! command -v bpf-linker &> /dev/null; then
-        cargo install bpf-linker || log_error "Failed to install bpf-linker."
+        # Install bpf-linker using the nightly toolchain as it might depend on nightly features
+        cargo +nightly install bpf-linker || log_error "Failed to install bpf-linker."
     else
         log_info "bpf-linker is already installed."
     fi
@@ -292,13 +296,17 @@ compile_project() {
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
 
     log_info "Updating Cargo dependencies..."
-    cargo update || log_error "Failed to update Cargo dependencies."
+    # Use nightly toolchain for cargo update as well
+    cargo +nightly update || log_error "Failed to update Cargo dependencies."
 
-    cargo build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
+    # Use nightly toolchain for building the eBPF program
+    cargo +nightly build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
     log_info "Compiling user-space application ($USER_CRATE)..."
-    cargo build --workspace --release || log_error "Failed to compile user-space application."
+    # User-space application can typically be built with stable, but for consistency/simplicity,
+    # we'll use nightly if it's set up to avoid potential toolchain mismatches.
+    cargo +nightly build --workspace --release || log_error "Failed to compile user-space application."
     log_info "User-space application compiled."
     popd > /dev/null # Go back to the original directory
 }
