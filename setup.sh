@@ -7,6 +7,7 @@
 PROJECT_NAME="aya-firewall" # Renamed to avoid confusion with PROJECT_DIR
 EBPF_CRATE="firewall-ebpf"
 USER_CRATE="firewall-user"
+NIGHTLY_VERSION="nightly-2025-05-01" # A specific nightly version known to be more stable for bpfel-unknown-none
 
 # --- Functions ---
 
@@ -47,19 +48,19 @@ install_prerequisites() {
         log_info "Rust and Cargo are already installed."
     fi
 
-    log_info "Installing Rust nightly toolchain..."
-    rustup install nightly || log_error "Failed to install Rust nightly toolchain."
+    log_info "Installing Rust nightly toolchain ($NIGHTLY_VERSION)..."
+    rustup install "$NIGHTLY_VERSION" || log_error "Failed to install Rust nightly toolchain ($NIGHTLY_VERSION)."
 
-    log_info "Adding bpfel-unknown-none target to Rustup nightly toolchain..."
+    log_info "Adding bpfel-unknown-none target to Rustup $NIGHTLY_VERSION toolchain..."
     # This is crucial for cross-compiling eBPF programs, and it's typically available on nightly
-    rustup target add bpfel-unknown-none --toolchain nightly || log_error "Failed to add bpfel-unknown-none target to nightly."
+    rustup target add bpfel-unknown-none --toolchain "$NIGHTLY_VERSION" || log_error "Failed to add bpfel-unknown-none target to $NIGHTLY_VERSION."
 
     log_info "Installing bpf-linker..."
     # Ensure cargo is in PATH for this to work in a fresh environment
     export PATH="$HOME/.cargo/bin:$PATH"
     if ! command -v bpf-linker &> /dev/null; then
-        # Install bpf-linker using the nightly toolchain as it might depend on nightly features
-        cargo +nightly install bpf-linker || log_error "Failed to install bpf-linker."
+        # Install bpf-linker using the specific nightly toolchain
+        cargo +"$NIGHTLY_VERSION" install bpf-linker || log_error "Failed to install bpf-linker."
     else
         log_info "bpf-linker is already installed."
     fi
@@ -280,7 +281,7 @@ fn bump_memlock_rlimit() -> Result<()> {
 
     let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
     if ret != 0 {
-        return Err(anyhow::anyhow!("Failed to set rlimit: {}", std::io::Error::last_os_error()));
+        return Err(anyhow::any_how!("Failed to set rlimit: {}", std::io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -295,18 +296,18 @@ compile_project() {
     # Ensure we're in the project root for workspace build
     pushd "$PROJECT_NAME" > /dev/null || log_error "Failed to move to project directory for compilation."
 
-    log_info "Updating Cargo dependencies..."
-    # Use nightly toolchain for cargo update as well
-    cargo +nightly update || log_error "Failed to update Cargo dependencies."
+    log_info "Updating Cargo dependencies using $NIGHTLY_VERSION..."
+    # Use specific nightly toolchain for cargo update
+    cargo +"$NIGHTLY_VERSION" update || log_error "Failed to update Cargo dependencies."
 
-    # Use nightly toolchain for building the eBPF program
-    cargo +nightly build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
+    log_info "Compiling eBPF program ($EBPF_CRATE) using $NIGHTLY_VERSION..."
+    # Use specific nightly toolchain for building the eBPF program
+    cargo +"$NIGHTLY_VERSION" build --workspace --release --target bpfel-unknown-none || log_error "Failed to compile eBPF program."
     log_info "eBPF program compiled."
 
-    log_info "Compiling user-space application ($USER_CRATE)..."
-    # User-space application can typically be built with stable, but for consistency/simplicity,
-    # we'll use nightly if it's set up to avoid potential toolchain mismatches.
-    cargo +nightly build --workspace --release || log_error "Failed to compile user-space application."
+    log_info "Compiling user-space application ($USER_CRATE) using $NIGHTLY_VERSION..."
+    # Use specific nightly toolchain for building the user-space application
+    cargo +"$NIGHTLY_VERSION" build --workspace --release || log_error "Failed to compile user-space application."
     log_info "User-space application compiled."
     popd > /dev/null # Go back to the original directory
 }
